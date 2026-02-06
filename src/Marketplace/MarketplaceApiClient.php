@@ -243,6 +243,7 @@ final class MarketplaceApiClient
      */
     /**
      * @param array<int|string, mixed> $data
+     *
      * @return array{rows: array<int, array<string, mixed>>, total: ?int}
      */
     private function normalizeListPayload(array $data): array
@@ -273,11 +274,12 @@ final class MarketplaceApiClient
 
     /**
      * @param array<int|string, mixed> $rows
+     *
      * @return array<int, array<string, mixed>>
      */
     private function normalizeRows(array $rows): array
     {
-        if ($rows === []) {
+        if ([] === $rows) {
             return [];
         }
 
@@ -293,7 +295,7 @@ final class MarketplaceApiClient
      */
     private function isAssoc(array $value): bool
     {
-        if ($value === []) {
+        if ([] === $value) {
             return false;
         }
 
