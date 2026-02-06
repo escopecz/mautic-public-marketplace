@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PROJECT_NAME="mautic-marketplace"
+SUPABASE_DB_CONTAINER="ddev-${PROJECT_NAME}-supabase-db"
+
+SUPABASE_URL_LOCAL="http://localhost:8000"
+SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvY2FsLWRldiIsInJvbGUiOiJhbm9uIiwiaWF0IjoxNzcwMzIxMzM5LCJleHAiOjIwODU2ODEzMzl9.wSJj3yVYt9N7NkN5GRV-ImVZiTwG2frnPobGsDkMdD0"
+SUPABASE_SERVICE_ROLE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxvY2FsLWRldiIsInJvbGUiOiJzZXJ2aWNlX3JvbGUiLCJpYXQiOjE3NzAzMjEzMzksImV4cCI6MjA4NTY4MTMzOX0.2jg47dacNmUr7Md1NPDJjd-liOL41qMQEtUbSZpQZeM"
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+require_cmd ddev
+require_cmd docker
+require_cmd deno
+
+cd "$ROOT_DIR"
+
+ddev start
+
+# Wait for Supabase DB to be ready
+retries=30
+until docker exec "$SUPABASE_DB_CONTAINER" pg_isready -U postgres -d postgres >/dev/null 2>&1; do
+  ((retries--)) || { echo "Supabase DB not ready" >&2; exit 1; }
+  sleep 2
+ done
+
+# Apply migrations in order (only if not already initialized)
+if docker exec "$SUPABASE_DB_CONTAINER" psql -U postgres -d postgres -tAc "select to_regclass('public.packages')" | grep -q "packages"; then
+  echo "Supabase schema already initialized. Skipping migrations."
+else
+  migrations=("$ROOT_DIR"/supabase/migrations/*.sql)
+  if [ ${#migrations[@]} -eq 0 ]; then
+    echo "No migrations found in supabase/migrations" >&2
+    exit 1
+  fi
+
+  for migration in "${migrations[@]}"; do
+    docker exec -i "$SUPABASE_DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < "$migration"
+  done
+fi
+
+# Refresh functions used by the marketplace UI
+if [ -f "$ROOT_DIR/supabase/seed/dev_refresh.sql" ]; then
+  docker exec -i "$SUPABASE_DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < "$ROOT_DIR/supabase/seed/dev_refresh.sql"
+fi
+
+# Seed minimal data for local development
+if [ -f "$ROOT_DIR/supabase/seed/dev_seed.sql" ]; then
+  docker exec -i "$SUPABASE_DB_CONTAINER" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < "$ROOT_DIR/supabase/seed/dev_seed.sql"
+fi
+
+# Create .env.local if missing
+if [ ! -f .env.local ]; then
+  cat <<ENV > .env.local
+APP_ENV=dev
+APP_SECRET=change-me
+SUPABASE_API_BASE=${SUPABASE_URL_LOCAL}
+SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+SUPABASE_URL=${SUPABASE_URL_LOCAL}
+SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+ENV
+fi
+
+# Seed packages via edge function runner
+SUPABASE_URL="${SUPABASE_URL_LOCAL}" \
+SUPABASE_SERVICE_ROLE_KEY="${SUPABASE_SERVICE_ROLE_KEY}" \
+  deno run --allow-env --allow-read --allow-net supabase/functions/fetch_package/index.ts
+
+echo "Dev setup complete."

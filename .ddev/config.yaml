@@ -1,0 +1,13 @@
+name: mautic-marketplace
+type: php
+php_version: "8.4"
+docroot: public
+webserver_type: nginx-fpm
+xdebug_enabled: false
+use_dns_when_possible: true
+additional_fqdns: []
+additional_hostnames: []
+omit_containers:
+  - dba
+upload_dirs:
+  - var

@@ -1,0 +1,142 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ name }}{% endblock %}
+
+{% block body %}
+    {% if error %}
+        <p class="muted">{{ error }}</p>
+    {% endif %}
+
+    {% if package %}
+        <p class="muted">
+            <a href="{{ path('marketplace_index') }}">&larr; Back to Marketplace</a>
+        </p>
+        <header class="detail-header">
+            <h1 class="detail-title">{{ package.displayName ?: package.name }}</h1>
+            <div class="detail-subtitle">
+                <span class="muted">{{ package.name }}</span>
+                {% if package.type %}
+                    <span class="badge">{{ package.type }}</span>
+                {% endif %}
+                {% if package.latestMauticSupport %}
+                    <span class="badge">Latest Mautic supported</span>
+                {% endif %}
+            </div>
+            {% if package.description %}
+                <p>{{ package.description }}</p>
+            {% endif %}
+        </header>
+
+        <section class="stat-grid">
+            <div class="stat-card">
+                <div class="stat-card__label">Downloads</div>
+                <div class="stat-card__value">{{ package.downloads.total ?? 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__label">Favers</div>
+                <div class="stat-card__value">{{ package.favers ?? 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__label">Stars</div>
+                <div class="stat-card__value">{{ package.githubStars ?? 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__label">Forks</div>
+                <div class="stat-card__value">{{ package.githubForks ?? 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__label">Open issues</div>
+                <div class="stat-card__value">{{ package.githubOpenIssues ?? 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__label">Dependents</div>
+                <div class="stat-card__value">{{ package.dependents ?? 0 }}</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-card__label">Suggesters</div>
+                <div class="stat-card__value">{{ package.suggesters ?? 0 }}</div>
+            </div>
+            {% if package.time %}
+                <div class="stat-card">
+                    <div class="stat-card__label">Last updated</div>
+                    <div class="stat-card__value">{{ package.time|date('Y-m-d') }}</div>
+                </div>
+            {% endif %}
+        </section>
+
+        <section class="section">
+            <h2>Details</h2>
+            <dl class="info-list">
+                {% if package.language %}<dt>Language</dt><dd>{{ package.language }}</dd>{% endif %}
+                {% if package.repository %}
+                    <dt>Repository</dt>
+                    <dd><a href="{{ package.repository }}" target="_blank" rel="noopener">View repository</a></dd>
+                {% endif %}
+                {% if package.url %}
+                    <dt>Packagist</dt>
+                    <dd><a href="{{ package.url }}" target="_blank" rel="noopener">View on Packagist</a></dd>
+                {% endif %}
+                {% if package.maintainers %}
+                    <dt>Maintainers</dt>
+                    <dd>
+                        <div class="chip-list">
+                            {% for maintainer in package.maintainers %}
+                                <span class="chip">{{ maintainer.name ?? maintainer }}</span>
+                            {% endfor %}
+                        </div>
+                    </dd>
+                {% endif %}
+            </dl>
+        </section>
+
+        <section class="section">
+            <h2>Versions</h2>
+            {% if package.versions %}
+                {% set versionKeys = package.versions|keys|sort|reverse %}
+                {% set smvList = [] %}
+                {% for version, data in package.versions %}
+                    {% if data.smv is defined and data.smv is not empty and (data.smv not in smvList) %}
+                        {% set smvList = smvList|merge([data.smv]) %}
+                    {% endif %}
+                {% endfor %}
+                {% if smvList is not empty %}
+                    <p class="muted">Supported Mautic versions: {{ smvList|join(', ') }}</p>
+                {% endif %}
+                <div class="chip-list">
+                    {% for version in versionKeys %}
+                        <span class="chip">{{ version }}</span>
+                    {% endfor %}
+                </div>
+                <p class="muted">{{ versionKeys|length }} versions</p>
+            {% else %}
+                <p class="muted">No versions available.</p>
+            {% endif %}
+        </section>
+
+        <section class="section">
+            <h2>Reviews</h2>
+            {% if package.reviews %}
+                {% set hasReview = false %}
+                {% for key, review in package.reviews %}
+                    {% if review.rating is not null or review.review is not null %}
+                        {% set hasReview = true %}
+                        <div class="review-card">
+                            <div><strong>{{ review.name ?? key }}</strong></div>
+                            {% if review.rating is not null %}
+                                <div class="review-card__meta">Rating: {{ review.rating }}/5</div>
+                            {% endif %}
+                            {% if review.review %}
+                                <div>{{ review.review }}</div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                {% endfor %}
+                {% if not hasReview %}
+                    <p class="muted">No reviews yet.</p>
+                {% endif %}
+            {% else %}
+                <p class="muted">No reviews yet.</p>
+            {% endif %}
+        </section>
+    {% endif %}
+{% endblock %}

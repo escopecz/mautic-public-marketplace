@@ -1,0 +1,143 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Marketplace{% endblock %}
+
+{% block body %}
+    {% set current = app.request.query.all %}
+    {% set orderby = filters.orderby %}
+    {% set orderdir = filters.orderdir %}
+
+    <h1 class="page-title">Marketplace</h1>
+    <p class="muted">Browse community packages compatible with Mautic.</p>
+
+    {% if error %}
+        <p class="muted">{{ error }}</p>
+    {% endif %}
+
+    <form class="toolbar" method="get" id="marketplace-filters" data-autosubmit="true">
+        <div class="bx--form-item">
+            <label class="bx--label" for="query">Search</label>
+            <input class="bx--text-input" id="query" name="query" type="text" value="{{ filters.query ?? '' }}" placeholder="Search packages">
+        </div>
+        <div class="bx--form-item">
+            <label class="bx--label" for="type">Type</label>
+            <div class="bx--select">
+                <select class="bx--select-input" id="type" name="type">
+                    <option value="">All types</option>
+                    <option value="mautic-plugin" {% if filters.type == 'mautic-plugin' %}selected{% endif %}>Plugin</option>
+                    <option value="mautic-theme" {% if filters.type == 'mautic-theme' %}selected{% endif %}>Theme</option>
+                </select>
+                <svg class="bx--select__arrow" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                    <path d="M8 11L3 6h10L8 11z" fill="currentColor"></path>
+                </svg>
+            </div>
+        </div>
+        <div class="bx--form-item">
+            <label class="bx--label" for="mautic">Mautic version</label>
+            <input class="bx--text-input" id="mautic" name="mautic" type="text" value="{{ filters.mautic ?? '' }}" placeholder="e.g. ^5.0">
+        </div>
+        <input type="hidden" name="orderby" value="{{ orderby }}">
+        <input type="hidden" name="orderdir" value="{{ orderdir }}">
+        <input type="hidden" name="limit" value="{{ filters.limit }}">
+    </form>
+
+    {% if result and result.items is not empty %}
+        <div class="table-wrap">
+            <div class="table-scroll">
+                <table class="bx--data-table bx--data-table--compact bx--data-table--zebra">
+                    <thead>
+                        <tr>
+                            {% set nameDir = (orderby == 'name' and orderdir == 'asc') ? 'desc' : 'asc' %}
+                            <th>
+                                <a class="sort-link" href="{{ path('marketplace_index', current|merge({'orderby': 'name', 'orderdir': nameDir})) }}">
+                                    Name
+                                    {% if orderby == 'name' %}
+                                        <span class="sort-indicator">{{ orderdir == 'asc' ? '▲' : '▼' }}</span>
+                                    {% endif %}
+                                </a>
+                            </th>
+                            <th>Type</th>
+                            {% set downloadsDir = (orderby == 'downloads' and orderdir == 'asc') ? 'desc' : 'asc' %}
+                            <th>
+                                <a class="sort-link" href="{{ path('marketplace_index', current|merge({'orderby': 'downloads', 'orderdir': downloadsDir})) }}">
+                                    Downloads
+                                    {% if orderby == 'downloads' %}
+                                        <span class="sort-indicator">{{ orderdir == 'asc' ? '▲' : '▼' }}</span>
+                                    {% endif %}
+                                </a>
+                            </th>
+                            {% set ratingDir = (orderby == 'rating' and orderdir == 'asc') ? 'desc' : 'asc' %}
+                            <th>
+                                <a class="sort-link" href="{{ path('marketplace_index', current|merge({'orderby': 'rating', 'orderdir': ratingDir})) }}">
+                                    Rating
+                                    {% if orderby == 'rating' %}
+                                        <span class="sort-indicator">{{ orderdir == 'asc' ? '▲' : '▼' }}</span>
+                                    {% endif %}
+                                </a>
+                            </th>
+                            <th>Reviews</th>
+                            <th>Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in result.items %}
+                            <tr>
+                                <td>
+                                    <div>
+                                        <a href="{{ path('marketplace_detail', { package: item.name }) }}">
+                                            {{ item.displayName ?: item.name }}
+                                        </a>
+                                    </div>
+                                    {% if item.description %}
+                                        <div class="muted">{{ item.description }}</div>
+                                    {% endif %}
+                                </td>
+                                <td>{{ item.type ?? '—' }}</td>
+                                <td>{{ item.downloadsTotal is not null ? item.downloadsTotal|number_format(0, '.', ',') : 0 }}</td>
+                                <td>{{ item.averageRating is not null ? item.averageRating|number_format(1) : '—' }}</td>
+                                <td>{{ item.totalReviews ?? 0 }}</td>
+                                <td>
+                                    {% if item.updatedAt %}
+                                        {{ item.updatedAt|date('Y-m-d') }}
+                                    {% else %}
+                                        —
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% if result.total is not null %}
+            {% set totalPages = (result.total / result.limit)|round(0, 'ceil') %}
+            {% if totalPages > 1 %}
+                {% set currentPage = (result.offset / result.limit)|round(0, 'floor') + 1 %}
+                <nav class="pagination" aria-label="Pagination">
+                    {% set prevOffset = result.offset - result.limit %}
+                    {% set nextOffset = result.offset + result.limit %}
+                    <div class="pagination__controls">
+                        {% if prevOffset >= 0 %}
+                            <a class="bx--btn bx--btn--tertiary bx--btn--sm"
+                               href="{{ path('marketplace_index', current|merge({'offset': prevOffset})) }}">Previous</a>
+                        {% else %}
+                            <span class="bx--btn bx--btn--tertiary bx--btn--sm bx--btn--disabled">Previous</span>
+                        {% endif %}
+
+                        {% if nextOffset < result.total %}
+                            <a class="bx--btn bx--btn--tertiary bx--btn--sm"
+                               href="{{ path('marketplace_index', current|merge({'offset': nextOffset})) }}">Next</a>
+                        {% else %}
+                            <span class="bx--btn bx--btn--tertiary bx--btn--sm bx--btn--disabled">Next</span>
+                        {% endif %}
+                    </div>
+                    <div class="pagination__meta muted">
+                        Page {{ currentPage }} of {{ totalPages }} • {{ result.total }} results
+                    </div>
+                </nav>
+            {% endif %}
+        {% endif %}
+    {% else %}
+        <div class="empty-state muted">No packages found.</div>
+    {% endif %}
+{% endblock %}

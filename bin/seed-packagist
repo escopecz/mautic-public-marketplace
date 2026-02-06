@@ -1,0 +1,360 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Symfony\Component\HttpClient\HttpClient;
+
+require dirname(__DIR__) . '/vendor/autoload.php';
+
+final class PackagistSeeder
+{
+    public const DEFAULT_QUERY = 'mautic';
+    public const DEFAULT_LIMIT = 30;
+    public const DEFAULT_SMV_MODE = 'synthetic';
+    private const ALLOWED_TYPES = ['mautic-plugin', 'mautic-theme'];
+
+    private string $supabaseUrl;
+    private string $serviceRoleKey;
+    private string $smvMode;
+
+    public function __construct(string $supabaseUrl, string $serviceRoleKey, string $smvMode)
+    {
+        $this->supabaseUrl = rtrim($this->normalizeSupabaseUrl($supabaseUrl), '/');
+        $this->serviceRoleKey = $serviceRoleKey;
+        $this->smvMode = $this->normalizeSmvMode($smvMode);
+    }
+
+    public function run(string $query, int $limit): void
+    {
+        $client = HttpClient::create([
+            'timeout' => 20,
+        ]);
+
+        $this->deleteNonMarketplaceTypes();
+
+        $packages = $this->searchPackagist($client, $query, $limit);
+        if ($packages === []) {
+            fwrite(STDERR, "No packages found from Packagist search.\n");
+            return;
+        }
+
+        foreach ($packages as $package) {
+            $detail = $this->fetchPackageDetail($client, $package['name']);
+            if ($detail === null) {
+                continue;
+            }
+
+            $packagePayload = $this->buildPackagePayload($package, $detail);
+            if (!in_array($packagePayload['type'] ?? null, self::ALLOWED_TYPES, true)) {
+                continue;
+            }
+            $this->upsertSupabase('packages', [$packagePayload], 'name');
+
+            $versionPayloads = $this->buildVersionPayloads($detail, $package['name']);
+            if ($versionPayloads !== []) {
+                $this->upsertSupabase('versions', $versionPayloads, 'package_name,version');
+                if ($this->smvMode === 'synthetic') {
+                    $this->updateVersionsSmv($package['name'], $this->syntheticSmv($package['name']));
+                }
+            }
+        }
+    }
+
+    private function searchPackagist(\Symfony\Contracts\HttpClient\HttpClientInterface $client, string $query, int $limit): array
+    {
+        $url = sprintf('https://packagist.org/search.json?q=%s&per_page=%d', rawurlencode($query), $limit);
+        try {
+            $data = $client->request('GET', $url)->toArray(false);
+        } catch (\Throwable $exception) {
+            fwrite(STDERR, "Failed to reach Packagist. Check your network and try again.\n");
+            throw $exception;
+        }
+
+        $results = $data['results'] ?? [];
+        if (!is_array($results)) {
+            return [];
+        }
+
+        $packages = [];
+        foreach ($results as $row) {
+            if (!is_array($row) || empty($row['name'])) {
+                continue;
+            }
+
+            $packages[] = [
+                'name' => (string) $row['name'],
+                'description' => isset($row['description']) ? (string) $row['description'] : null,
+                'type' => isset($row['type']) ? (string) $row['type'] : null,
+                'repository' => isset($row['repository']) ? (string) $row['repository'] : null,
+                'downloads' => isset($row['downloads']) ? (int) $row['downloads'] : 0,
+                'favers' => isset($row['favers']) ? (int) $row['favers'] : 0,
+                'url' => isset($row['url']) ? (string) $row['url'] : null,
+            ];
+        }
+
+        return $packages;
+    }
+
+    private function fetchPackageDetail(\Symfony\Contracts\HttpClient\HttpClientInterface $client, string $name): ?array
+    {
+        $url = sprintf('https://packagist.org/packages/%s.json', $name);
+        try {
+            $data = $client->request('GET', $url)->toArray(false);
+        } catch (\Throwable $exception) {
+            fwrite(STDERR, "Failed to fetch Packagist package: {$name}\n");
+            return null;
+        }
+
+        if (!isset($data['package']) || !is_array($data['package'])) {
+            return null;
+        }
+
+        return $data['package'];
+    }
+
+    private function buildPackagePayload(array $searchRow, array $detail): array
+    {
+        $versions = is_array($detail['versions'] ?? null) ? $detail['versions'] : [];
+        $latest = $this->pickLatestVersion($versions);
+
+        return [
+            'name' => $searchRow['name'],
+            'description' => $searchRow['description'],
+            'type' => $searchRow['type'] ?: ($detail['type'] ?? null),
+            'repository' => $searchRow['repository'] ?? ($detail['repository'] ?? null),
+            'downloads' => ['total' => $searchRow['downloads']],
+            'favers' => $searchRow['favers'],
+            'url' => $searchRow['url'],
+            'displayname' => $detail['name'] ?? $searchRow['name'],
+            'time' => isset($latest['time']) ? (string) $latest['time'] : null,
+            'maintainers' => $detail['maintainers'] ?? null,
+            'latest_mautic_support' => true,
+        ];
+    }
+
+    private function buildVersionPayloads(array $detail, string $packageName): array
+    {
+        $name = $detail['name'] ?? null;
+        $versions = is_array($detail['versions'] ?? null) ? $detail['versions'] : [];
+        if (!is_string($name) || $versions === []) {
+            return [];
+        }
+
+        $payloads = [];
+        foreach ($versions as $version => $data) {
+            if (!is_array($data)) {
+                continue;
+            }
+            if (str_starts_with((string) $version, 'dev-')) {
+                continue;
+            }
+
+            $smv = $this->smvMode === 'packagist'
+                ? $this->extractMauticConstraint($data)
+                : $this->syntheticSmv($packageName);
+
+            $payloads[] = [
+                'package_name' => $name,
+                'description' => $data['description'] ?? null,
+                'version' => $data['version'] ?? $data['version_normalized'] ?? (string) $version,
+                'version_normalized' => $data['version_normalized'] ?? $data['version'] ?? (string) $version,
+                'type' => $data['type'] ?? $detail['type'] ?? null,
+                'smv' => $smv,
+                'time' => $data['time'] ?? null,
+            ];
+        }
+
+        return $payloads;
+    }
+
+    private function pickLatestVersion(array $versions): ?array
+    {
+        $candidates = [];
+        foreach ($versions as $version => $data) {
+            if (!is_array($data)) {
+                continue;
+            }
+            if (str_starts_with((string) $version, 'dev-')) {
+                continue;
+            }
+            $candidates[] = $data;
+        }
+
+        if ($candidates === []) {
+            return null;
+        }
+
+        usort($candidates, static function (array $a, array $b): int {
+            $timeA = isset($a['time']) ? strtotime((string) $a['time']) : 0;
+            $timeB = isset($b['time']) ? strtotime((string) $b['time']) : 0;
+            return $timeB <=> $timeA;
+        });
+
+        return $candidates[0];
+    }
+
+    private function extractMauticConstraint(array $version): string
+    {
+        $require = $version['require'] ?? null;
+        if (is_array($require)) {
+            if (isset($require['mautic/core-lib'])) {
+                return (string) $require['mautic/core-lib'];
+            }
+            if (isset($require['mautic/mautic'])) {
+                return (string) $require['mautic/mautic'];
+            }
+        }
+
+        $extra = $version['extra'] ?? null;
+        if (is_array($extra)) {
+            foreach (['mautic-version', 'mautic_version', 'mautic'] as $key) {
+                if (isset($extra[$key])) {
+                    return (string) $extra[$key];
+                }
+            }
+        }
+
+        return '^5.0';
+    }
+
+    private function syntheticSmv(string $packageName): string
+    {
+        $hash = crc32($packageName);
+        return ($hash % 3 === 0) ? '^4.4' : '^5.0';
+    }
+
+    private function normalizeSmvMode(string $mode): string
+    {
+        $mode = strtolower(trim($mode));
+        return $mode === 'packagist' ? 'packagist' : 'synthetic';
+    }
+
+    private function upsertSupabase(string $table, array $payload, string $conflict): void
+    {
+        $client = HttpClient::create([
+            'timeout' => 20,
+        ]);
+
+        $url = sprintf('%s/rest/v1/%s?on_conflict=%s', $this->supabaseUrl, $table, rawurlencode($conflict));
+
+        $client->request('POST', $url, [
+            'headers' => [
+                'apikey' => $this->serviceRoleKey,
+                'Authorization' => sprintf('Bearer %s', $this->serviceRoleKey),
+                'Content-Type' => 'application/json',
+                'Prefer' => 'resolution=merge-duplicates,return=minimal',
+            ],
+            'body' => json_encode($payload, JSON_THROW_ON_ERROR),
+        ])->getStatusCode();
+    }
+
+    private function updateVersionsSmv(string $packageName, string $smv): void
+    {
+        $client = HttpClient::create([
+            'timeout' => 20,
+        ]);
+
+        $url = sprintf('%s/rest/v1/versions?package_name=eq.%s', $this->supabaseUrl, rawurlencode($packageName));
+
+        $client->request('PATCH', $url, [
+            'headers' => [
+                'apikey' => $this->serviceRoleKey,
+                'Authorization' => sprintf('Bearer %s', $this->serviceRoleKey),
+                'Content-Type' => 'application/json',
+                'Prefer' => 'return=minimal',
+            ],
+            'body' => json_encode(['smv' => $smv], JSON_THROW_ON_ERROR),
+        ])->getStatusCode();
+    }
+
+    private function deleteNonMarketplaceTypes(): void
+    {
+        $client = HttpClient::create([
+            'timeout' => 20,
+        ]);
+
+        $client->request('DELETE', sprintf('%s/rest/v1/packages?type=not.in.(mautic-plugin,mautic-theme)', $this->supabaseUrl), [
+            'headers' => [
+                'apikey' => $this->serviceRoleKey,
+                'Authorization' => sprintf('Bearer %s', $this->serviceRoleKey),
+            ],
+        ])->getStatusCode();
+    }
+
+    private function normalizeSupabaseUrl(string $url): string
+    {
+        $parts = parse_url($url);
+        if (!is_array($parts) || !isset($parts['host'])) {
+            return $url;
+        }
+
+        if ($parts['host'] === 'supabase-kong') {
+            $scheme = $parts['scheme'] ?? 'http';
+            $port = isset($parts['port']) ? ':' . $parts['port'] : '';
+            $path = $parts['path'] ?? '';
+            return sprintf('%s://127.0.0.1%s%s', $scheme, $port, $path);
+        }
+
+        return $url;
+    }
+}
+
+function readEnvValue(string $key): ?string
+{
+    $value = getenv($key);
+    if (is_string($value) && $value !== '') {
+        return $value;
+    }
+
+    $envFile = dirname(__DIR__) . '/.env.local';
+    if (!file_exists($envFile)) {
+        return null;
+    }
+
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    if ($lines === false) {
+        return null;
+    }
+
+    foreach ($lines as $line) {
+        if (!str_contains($line, '=')) {
+            continue;
+        }
+        [$name, $val] = explode('=', $line, 2);
+        if (trim($name) === $key) {
+            return trim($val);
+        }
+    }
+
+    return null;
+}
+
+$args = $argv;
+array_shift($args);
+$query = PackagistSeeder::DEFAULT_QUERY;
+$limit = PackagistSeeder::DEFAULT_LIMIT;
+$smvMode = PackagistSeeder::DEFAULT_SMV_MODE;
+
+foreach ($args as $arg) {
+    if (str_starts_with($arg, '--query=')) {
+        $query = substr($arg, 8);
+    }
+    if (str_starts_with($arg, '--limit=')) {
+        $limit = (int) substr($arg, 8);
+    }
+    if (str_starts_with($arg, '--smv=')) {
+        $smvMode = substr($arg, 6);
+    }
+}
+
+$supabaseUrl = readEnvValue('SUPABASE_URL') ?? readEnvValue('SUPABASE_API_BASE');
+$serviceKey = readEnvValue('SUPABASE_SERVICE_ROLE_KEY');
+
+if (!$supabaseUrl || !$serviceKey) {
+    fwrite(STDERR, "Missing SUPABASE_URL/SUPABASE_API_BASE or SUPABASE_SERVICE_ROLE_KEY in .env.local\n");
+    exit(1);
+}
+
+$seeder = new PackagistSeeder($supabaseUrl, $serviceKey, $smvMode);
+$seeder->run($query, $limit);
