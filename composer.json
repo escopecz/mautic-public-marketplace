@@ -66,7 +66,7 @@
         "supabase:db:push": "supabase db push",
         "supabase:functions:deploy": "supabase functions deploy fetch_package",
         "supabase:status": "supabase status",
-        "test": "phpunit",
+        "test": "vendor/bin/phpunit",
         "post-install-cmd": [
             "@auto-scripts"
         ],
