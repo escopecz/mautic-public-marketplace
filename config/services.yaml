@@ -25,9 +25,32 @@ services:
         arguments:
             $httpClient: '@marketplace.http_client'
             $anonKey: '%env(SUPABASE_ANON_KEY)%'
+            $serviceRoleKey: '%env(SUPABASE_SERVICE_ROLE_KEY)%'
+
+    App\Controller\MarketplaceController:
+        arguments:
+            $auth0Domain: '%env(AUTH0_DOMAIN)%'
+            $auth0ClientId: '%env(AUTH0_CLIENT_ID)%'
+
+    App\Controller\Api\ReviewApiController:
+        arguments:
+            $auth0Domain: '%env(AUTH0_DOMAIN)%'
 
     marketplace.http_client:
         class: Symfony\Contracts\HttpClient\HttpClientInterface
         factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
         arguments:
             - base_uri: '%env(SUPABASE_API_BASE)%'
+
+when@test:
+    services:
+        App\Tests\Mock\Auth0MockHttpClient:
+            class: App\Tests\Mock\Auth0MockHttpClient
+
+        App\Controller\Api\ReviewApiController:
+            autoconfigure: true
+            autowire: true
+            tags: ['controller.service_arguments']
+            arguments:
+                $httpClient: '@App\Tests\Mock\Auth0MockHttpClient'
+                $auth0Domain: 'test.auth0.com'

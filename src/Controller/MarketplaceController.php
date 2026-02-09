@@ -14,6 +14,8 @@ final class MarketplaceController extends AbstractController
 {
     public function __construct(
         private readonly MarketplaceApiClient $apiClient,
+        private readonly string $auth0Domain,
+        private readonly string $auth0ClientId,
     ) {
     }
 
@@ -88,6 +90,8 @@ final class MarketplaceController extends AbstractController
             'error' => null,
             'package' => $detail,
             'name' => $package,
+            'auth0_domain' => $this->auth0Domain,
+            'auth0_client_id' => $this->auth0ClientId,
         ]);
     }
 

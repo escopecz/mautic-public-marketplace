@@ -16,6 +16,7 @@ final class MarketplaceApiClient
     public function __construct(
         private readonly HttpClientInterface $httpClient,
         private readonly string $anonKey,
+        private readonly string $serviceRoleKey,
     ) {
     }
 
@@ -120,6 +121,57 @@ final class MarketplaceApiClient
             $this->toArray($row['reviews'] ?? null),
             $this->toArray($row['versions'] ?? null),
         );
+    }
+
+    public function submitReview(string $packageName, string $userId, string $userName, ?string $picture, int $rating, string $review): void
+    {
+        $this->requestJsonWithServiceRole('POST', '/rest/v1/reviews', [
+            'objectId' => $packageName,
+            'user_id' => $this->auth0SubToUuid($userId),
+            'user' => $userName,
+            'picture' => $picture,
+            'rating' => $rating,
+            'review' => $review,
+        ]);
+    }
+
+    private function auth0SubToUuid(string $sub): string
+    {
+        $hash = sha1($sub);
+
+        return \sprintf(
+            '%s-%s-5%s-%s-%s',
+            substr($hash, 0, 8),
+            substr($hash, 8, 4),
+            substr($hash, 13, 3),
+            substr($hash, 16, 4),
+            substr($hash, 20, 12),
+        );
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    private function requestJsonWithServiceRole(string $method, string $path, array $body): void
+    {
+        $response = $this->httpClient->request($method, $path, [
+            'json' => $body,
+            'headers' => [
+                'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
+                'apikey' => $this->serviceRoleKey,
+                'Authorization' => \sprintf('Bearer %s', $this->serviceRoleKey),
+                'Prefer' => 'return=minimal',
+            ],
+        ]);
+
+        $status = $response->getStatusCode();
+
+        if ($status >= 400) {
+            $payload = $response->toArray(false);
+            $message = $this->extractErrorMessage($payload) ?? \sprintf('HTTP %d', $status);
+            throw new MarketplaceApiException(\sprintf('Supabase API error (%s).', $message));
+        }
     }
 
     /**
