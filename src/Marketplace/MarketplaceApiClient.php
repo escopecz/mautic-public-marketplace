@@ -128,26 +128,12 @@ final class MarketplaceApiClient
     {
         $this->requestJsonWithServiceRole('POST', '/rest/v1/reviews', [
             'objectId' => $packageName,
-            'user_id' => $this->auth0SubToUuid($userId),
+            'auth0_user_id' => $userId,
             'user' => $userName,
             'picture' => $picture,
             'rating' => $reviewRequest->rating,
             'review' => $reviewRequest->review,
         ]);
-    }
-
-    private function auth0SubToUuid(string $sub): string
-    {
-        $hash = sha1($sub);
-
-        return \sprintf(
-            '%s-%s-5%s-%s-%s',
-            substr($hash, 0, 8),
-            substr($hash, 8, 4),
-            substr($hash, 13, 3),
-            substr($hash, 16, 4),
-            substr($hash, 20, 12),
-        );
     }
 
     /**
