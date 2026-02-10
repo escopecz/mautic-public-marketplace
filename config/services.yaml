@@ -32,7 +32,7 @@ services:
             $auth0Domain: '%env(AUTH0_DOMAIN)%'
             $auth0ClientId: '%env(AUTH0_CLIENT_ID)%'
 
-    App\Controller\Api\ReviewApiController:
+    App\Auth0\Validator\Auth0TokenValidator:
         arguments:
             $auth0Domain: '%env(AUTH0_DOMAIN)%'
 
@@ -47,10 +47,8 @@ when@test:
         App\Tests\Mock\Auth0MockHttpClient:
             class: App\Tests\Mock\Auth0MockHttpClient
 
-        App\Controller\Api\ReviewApiController:
-            autoconfigure: true
+        App\Auth0\Validator\Auth0TokenValidator:
             autowire: true
-            tags: ['controller.service_arguments']
             arguments:
                 $httpClient: '@App\Tests\Mock\Auth0MockHttpClient'
                 $auth0Domain: 'test.auth0.com'

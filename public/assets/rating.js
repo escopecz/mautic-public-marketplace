@@ -1,27 +1,27 @@
 'use strict';
 
-var MarketplaceRating = {
+const MarketplaceRating = {
     init: function () {
-        var container = document.getElementById('marketplace-review-container');
+        const container = document.getElementById('marketplace-review-container');
         if (!container) {
             return;
         }
 
-        var AUTH0_DOMAIN = container.getAttribute('data-auth0-domain');
-        var AUTH0_CLIENT_ID = container.getAttribute('data-auth0-client-id');
-        var API_URL = container.getAttribute('data-api-url');
-        var PACKAGE_NAME = container.getAttribute('data-package-name');
-        var AUTH0_SDK_URL = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
+        const AUTH0_DOMAIN = container.getAttribute('data-auth0-domain');
+        const AUTH0_CLIENT_ID = container.getAttribute('data-auth0-client-id');
+        const API_URL = container.getAttribute('data-api-url');
+        const PACKAGE_NAME = container.getAttribute('data-package-name');
+        const AUTH0_SDK_URL = 'https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js';
 
-        var auth0Client = null;
+        let auth0Client = null;
 
-        var loadingEl = document.getElementById('auth-loading');
-        var loginEl = document.getElementById('auth-login');
-        var formEl = document.getElementById('auth-form');
-        var userNameEl = document.getElementById('auth-user-name');
-        var errorEl = document.getElementById('review-error');
-        var successEl = document.getElementById('review-success');
-        var submitBtn = document.getElementById('submit-btn');
+        const loadingEl = document.getElementById('auth-loading');
+        const loginEl = document.getElementById('auth-login');
+        const formEl = document.getElementById('auth-form');
+        const userNameEl = document.getElementById('auth-user-name');
+        const errorEl = document.getElementById('review-error');
+        const successEl = document.getElementById('review-success');
+        const submitBtn = document.getElementById('submit-btn');
 
         function loadAuth0SDK() {
             return new Promise(function (resolve, reject) {
@@ -30,7 +30,7 @@ var MarketplaceRating = {
                     return;
                 }
 
-                var script = document.createElement('script');
+                const script = document.createElement('script');
                 script.src = AUTH0_SDK_URL;
                 script.onload = resolve;
                 script.onerror = function () {
@@ -67,10 +67,10 @@ var MarketplaceRating = {
         async function updateUI() {
             loadingEl.style.display = 'none';
 
-            var isAuthenticated = await auth0Client.isAuthenticated();
+            const isAuthenticated = await auth0Client.isAuthenticated();
 
             if (isAuthenticated) {
-                var user = await auth0Client.getUser();
+                const user = await auth0Client.getUser();
                 userNameEl.textContent = user.name || user.email;
                 loginEl.style.display = 'none';
                 formEl.style.display = 'block';
@@ -95,18 +95,18 @@ var MarketplaceRating = {
             await auth0Client.logout({ logoutParams: { returnTo: window.location.origin } });
         });
 
-        var stars = document.querySelectorAll('#rating-stars .star-icon');
-        var ratingInput = document.getElementById('rating');
+        const stars = document.querySelectorAll('#rating-stars .star-icon');
+        const ratingInput = document.getElementById('rating');
 
         stars.forEach(function (star) {
             star.addEventListener('click', function () {
-                var rating = this.getAttribute('data-rating');
+                const rating = this.getAttribute('data-rating');
                 ratingInput.value = rating;
                 updateStars(rating);
             });
 
             star.addEventListener('mouseenter', function () {
-                var rating = this.getAttribute('data-rating');
+                const rating = this.getAttribute('data-rating');
                 highlightStars(rating);
             });
 
@@ -138,8 +138,8 @@ var MarketplaceRating = {
         document.getElementById('review-form').addEventListener('submit', async function (e) {
             e.preventDefault();
 
-            var rating = parseInt(ratingInput.value);
-            var review = document.getElementById('review').value;
+            const rating = parseInt(ratingInput.value);
+            const review = document.getElementById('review').value;
 
             if (rating < 1 || rating > 5) {
                 showError('Please select a rating between 1 and 5 stars.');
@@ -156,9 +156,9 @@ var MarketplaceRating = {
                 submitBtn.textContent = 'Submitting...';
                 hideMessages();
 
-                var token = await auth0Client.getTokenSilently();
+                const token = await auth0Client.getTokenSilently();
 
-                var response = await fetch(API_URL, {
+                const response = await fetch(API_URL, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -172,7 +172,7 @@ var MarketplaceRating = {
                 });
 
                 if (!response.ok) {
-                    var data = await response.json();
+                    const data = await response.json();
                     throw new Error(data.error || 'Failed to submit review');
                 }
 
